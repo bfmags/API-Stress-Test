@@ -149,7 +149,7 @@ def start_plot():
         if p90 is not None:
             ax1.plot(times, [p90]*total, '-.', label='p90 Latency')
         if p99 is not None:
-            ax1.plot(times, [p99]*total, linestyle=(0, (3, 1, 1, 1)), label='p99 Latency')
+            ax1.plot(times, [p99]*total, '-', label='p99 Latency')
         ax1.legend()
         ax1.set_ylabel('Requests / Latency (s)')
         ax1.set_xlabel('Time (s)')
@@ -190,6 +190,59 @@ def run_async_tasks_in_thread(keys, url, total_requests, concurrency, crescendo,
         loop.run_until_complete(task)
     finally:
         loop.close()
+
+
+def print_summary_stats(results_deque, latencies_list, status_counts_counter):
+    """Prints a summary of stress test results."""
+    total_completed_requests = len(results_deque)
+
+    if total_completed_requests == 0:
+        print("\n--- Stress Test Summary ---")
+        print("No requests were completed.")
+        print("-------------------------")
+        return
+
+    errors = sum(v for k, v in status_counts_counter.items() if isinstance(k, str) and k.startswith('ERR'))
+    error_rate = errors / total_completed_requests if total_completed_requests else 0
+    successful_requests = total_completed_requests - errors
+
+    avg_latency, p50_latency, p90_latency, p99_latency = None, None, None, None
+
+    # Use the pre-populated latencies_list which should only contain latencies from successful requests
+    sorted_lat = sorted(latencies_list)
+
+    if sorted_lat:
+        avg_latency = sum(sorted_lat) / len(sorted_lat)
+        if len(sorted_lat) >= 2:
+            p50_latency = sorted_lat[int(0.5 * len(sorted_lat))]
+            p90_latency = sorted_lat[int(0.9 * len(sorted_lat))]
+            p99_latency = sorted_lat[int(0.99 * len(sorted_lat))]
+        elif len(sorted_lat) == 1: # Only avg is truly representative
+            p50_latency = avg_latency
+            p90_latency = avg_latency
+            p99_latency = avg_latency
+
+    print("\n--- Stress Test Summary ---")
+    print(f"Total Requests Attempted (approx.): {total_completed_requests}") # Name changed for clarity
+    print(f"Successful Requests: {successful_requests}")
+    print(f"Failed Requests (Errors): {errors}")
+    print(f"Error Rate: {error_rate:.2%}")
+
+    if avg_latency is not None:
+        print(f"Average Latency (successful requests): {avg_latency:.4f} s")
+    if p50_latency is not None:
+        print(f"p50 Latency (Median): {p50_latency:.4f} s")
+    if p90_latency is not None:
+        print(f"p90 Latency: {p90_latency:.4f} s")
+    if p99_latency is not None:
+        print(f"p99 Latency: {p99_latency:.4f} s")
+
+    print("Status Code Counts:")
+    # Sort items by status code for consistent order
+    sorted_status_counts = sorted(status_counts_counter.items(), key=lambda item: str(item[0]))
+    for code, count in sorted_status_counts:
+        print(f"  {code}: {count}")
+    print("-------------------------")
 
 
 @click.command()
@@ -278,6 +331,8 @@ def main(api_keys_file, api_keys, total_requests, concurrency, crescendo,
             writer.writerow(['timestamp','latency','status'])
             writer.writerows(results)
         click.echo(f'CSV saved to {export_csv}')
+
+    print_summary_stats(results, latencies, status_counts)
     click.echo('Done!')
 
 

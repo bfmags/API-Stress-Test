@@ -3,53 +3,63 @@
 ## Features
 - Async + HTTPX for high throughput
 - Backoff strategies (fixed, exponential, decorrelated jitter)
-- Real-time plotting: cumulative requests, avg/p50/p90/p99 latencies, error rate
-- Run by count, duration, or user keypress
-- CSV & PNG export plot graphs
+- Real-time plotting (optional): cumulative requests, avg/p50/p90/p99 latencies, error rate
+- Summary statistics printout at the end of the test.
+- Run by request count or duration.
+- CSV export of raw metrics.
 
 ### Backoff Strategies
 - **Fixed**: sleep a constant `base` seconds each retry.
 - **Exponential**: sleep `base * 2**(attempt-1)`, capped at `cap`.
 - **Decorrelated Jitter**: random between `base` and `prev_sleep * 3`, capped.
 
-### Real-Time Plotting
+### Real-Time Plotting (Optional)
+When enabled (default), the tool displays:
 - **Cumulative requests**
-- **Avg latency**, **p50**, **p90**, **p99**
+- **Avg latency**, **p50**, **p90**, **p99** (explained below)
 - **Status counts** & **error rate** (failures/total)
+
+## Understanding Latency Metrics
+The latency metrics help you understand the performance characteristics of your API under load:
+- **Average Latency (avg):** The mean response time of all successful requests. While useful, it can be skewed by a small number of very slow or very fast requests.
+- **p50 Latency (Median):** The value below which 50% of the successful request latencies fall. This represents the typical latency experienced by users and is often more representative than the average.
+- **p90 Latency:** The value below which 90% of the successful request latencies fall. This helps understand the tail latency for the majority of requests, indicating what a typical "worst-case" experience might be for most users.
+- **p99 Latency:** The value below which 99% of the successful request latencies fall. This indicates the latency experienced by the slowest 1% of requests, highlighting extreme "worst-case" scenarios.
 
 ## Setup
 ```
-git clone ...
-cd api-stress-test
+git clone <repository_url>
+cd <repository_directory_name>
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 ```
-
-### Requirements
-* click
-* httpx[http2]
-* matplotlib
-
-*Mock Server*
-* fastapi
-* uvicorn
+*(Ensure `requirements.txt` is up-to-date with `click`, `httpx`, `matplotlib`)*
 
 ## Usage
+Example:
 ```
-python stress_test.py -f api_keys.txt -n 2000 -c 100 --crescendo 
-  -e /users --base-url https://api.example.com 
-  --retries 5 --backoff-method jitter --backoff-base 0.5 
-  --backoff-cap 20 --duration 60 --stop-on-key 
-  --export-csv data.csv
+python stress_test.py -f api_keys.txt -n 2000 -c 100 --crescendo \
+  -e /users --base-url https://api.example.com \
+  --retries 5 --backoff-method jitter --backoff-base 0.5 \
+  --backoff-cap 20 --duration 60 \
+  --export-csv data.csv --no-live-plot
 ```
 
-- `-f`/`-k`: API keys
-- `-n`: total requests
-- `-c`: concurrency
-- `--crescendo`: ramp
-- `--duration`: seconds to run
-- `--stop-on-key`: Enter to end
-- `--export-csv`: raw metrics
+### Command-Line Options
+- `-f, --api-keys-file PATH`: File with one API key per line.
+- `-k, --api-keys TEXT`: Comma-separated API keys.
+- `-n, --total-requests INTEGER`: Total number of requests to send. If omitted, the test runs for the specified `--duration` or until manually interrupted (if plotting is also disabled).
+- `-c, --concurrency INTEGER`: Number of concurrent requests to maintain. Default: 50.
+- `--crescendo / --no-crescendo`: Gradually ramp up concurrency to the target. Default: False.
+- `-e, --endpoint TEXT`: API endpoint path (e.g., `/users`). Required.
+- `--base-url TEXT`: API base URL (e.g., `http://127.0.0.1:8000`). Default: `http://127.0.0.1:8000`.
+- `--retries INTEGER`: Number of retries for failed requests. Default: 3.
+- `--backoff-method [fixed|exponential|jitter]`: Retry backoff strategy. Default: `exponential`.
+- `--backoff-base FLOAT`: Base time for backoff in seconds. Default: 1.0.
+- `--backoff-cap FLOAT`: Maximum backoff time in seconds. Default: 30.0.
+- `--duration INTEGER`: Duration to run the test in seconds. If `total-requests` is also set, the test stops when either limit is reached.
+- `--live-plot / --no-live-plot`: Enable or disable the live plotting GUI window. Defaults to enabled (`--live-plot`). If disabled (`--no-live-plot`), the test relies on `--duration` or `--total-requests` for completion, or manual interruption (Ctrl+C if those are not set).
+- `--export-csv PATH`: Export raw metrics (timestamp, latency, status) to a CSV file.
 
 ## Mock Server for Local Testing
 
@@ -59,9 +69,6 @@ It simulates random latency and occasional errors.
 Start Mock Server: 
 - `python mock_server.py`
 
-Start Stress Test: 
-- `python stress_test.py -k api_key -n 2000 -c 100 --crescendo 
-  -e /users --base-url http://127.0.0.1:8000 
-  --retries 5 --backoff-method jitter --backoff-base 0.5 
-  --backoff-cap 20 --duration 60 --stop-on-key 
-  --export-csv data.csv`
+Example Stress Test against Mock Server:
+- `python stress_test.py -k your_api_key -n 1000 -c 50 --crescendo -e /items --base-url http://127.0.0.1:8008 --duration 30 --export-csv mock_test_data.csv`
+*(Note: The mock server in `mock_server.py` runs on port 8008 and has an `/items` endpoint)*
