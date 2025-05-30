@@ -3,9 +3,9 @@
 ## Features
 - Async + HTTPX for high throughput
 - Backoff strategies (fixed, exponential, decorrelated jitter)
-- Cumulative requests, avg/p50/p90/p99 latencies, error rate
-- Real-time plotting / CSV export of raw metrics
-- Run by request count or duration
+- Real-time plotting: cumulative requests, avg/p50/p90/p99 latencies, error rate
+- Run by count, duration, or user break
+- CSV & PNG export plot graphs
 
 ### Backoff Strategies
 - **Fixed**: sleep a constant `base` seconds each retry.

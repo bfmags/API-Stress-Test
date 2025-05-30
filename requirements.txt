@@ -2,4 +2,3 @@ click
 httpx[http2]
 matplotlib
 fastapi[all]
-pytest
