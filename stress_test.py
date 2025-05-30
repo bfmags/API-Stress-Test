@@ -122,18 +122,34 @@ def start_plot():
         times = [t - t0 for t, *_ in data]
         total = len(times)
         # latency stats
-        lat = sorted(latencies)
-        p50 = lat[int(0.5*len(lat))]
-        p90 = lat[int(0.9*len(lat))]
-        p99 = lat[int(0.99*len(lat))]
-        avg = sum(lat)/len(lat)
+        lat = sorted(latencies) # lat will be an empty list if latencies is empty
+
+        p50, p90, p99, avg = None, None, None, None # Initialize stats
+
+        if not lat:
+            # No latency data to calculate statistics from
+            pass # avg, p50, p90, p99 remain None
+        elif len(lat) < 2:
+            # Not enough data for all percentiles, handle avg separately
+            avg = sum(lat) / len(lat)
+            # p50, p90, p99 remain None (or could be set to avg if preferred)
+        else: # Sufficient data
+            p50 = lat[int(0.5 * len(lat))]
+            p90 = lat[int(0.9 * len(lat))]
+            p99 = lat[int(0.99 * len(lat))]
+            avg = sum(lat) / len(lat)
+
         # plot metrics
         ax1.clear()
         ax1.plot(times, list(range(1, total+1)), label='Cumulative Requests')
-        ax1.plot(times, [avg]*total, '--', label='Avg Latency')
-        ax1.plot(times, [p50]*total, ':', label='p50 Latency')
-        ax1.plot(times, [p90]*total, '-.', label='p90 Latency')
-        ax1.plot(times, [p99]*total, (0, (3, 1, 1, 1)), label='p99 Latency')
+        if avg is not None:
+            ax1.plot(times, [avg]*total, '--', label='Avg Latency')
+        if p50 is not None:
+            ax1.plot(times, [p50]*total, ':', label='p50 Latency')
+        if p90 is not None:
+            ax1.plot(times, [p90]*total, '-.', label='p90 Latency')
+        if p99 is not None:
+            ax1.plot(times, [p99]*total, (0, (3, 1, 1, 1)), label='p99 Latency')
         ax1.legend()
         ax1.set_ylabel('Requests / Latency (s)')
         ax1.set_xlabel('Time (s)')
@@ -149,7 +165,7 @@ def start_plot():
         ax2.set_ylabel('Count')
         ax2.set_xlabel('Status Code')
 
-    ani = FuncAnimation(fig, update, interval=1000)
+    ani = FuncAnimation(fig, update, interval=1000, cache_frame_data=False)
     plt.tight_layout()
     plt.show()
 
@@ -189,11 +205,11 @@ def run_async_tasks_in_thread(keys, url, total_requests, concurrency, crescendo,
 @click.option('--backoff-base', type=float, default=1.0, help='Base backoff (s)')
 @click.option('--backoff-cap', type=float, default=30.0, help='Max backoff (s)')
 @click.option('--duration', type=int, default=None, help='Run for N seconds')
-@click.option('--stop-on-key', is_flag=True, help='Stop on Enter')
+@click.option('--live-plot/--no-live-plot', 'live_plot_enabled', default=True, help='Enable or disable live plotting window.')
 @click.option('--export-csv', type=click.Path(), default=None, help='Export raw CSV')
 def main(api_keys_file, api_keys, total_requests, concurrency, crescendo,
          endpoint, base_url, retries, backoff_method, backoff_base,
-         backoff_cap, duration, stop_on_key, export_csv):
+         backoff_cap, duration, live_plot_enabled, export_csv):
     """CLI wrapper: parse, set stop conditions, launch worker & plotting."""
     global start_time
     # Load keys
@@ -212,12 +228,9 @@ def main(api_keys_file, api_keys, total_requests, concurrency, crescendo,
     start_time = time.time()
 
     # stop triggers
-    if stop_on_key:
-        # asyncio.get_event_loop().add_reader(sys.stdin, lambda: stop_event.set()) # No asyncio loop from main
-        pass
-    if duration:
-        # asyncio.get_event_loop().call_later(duration, stop_event.set) # No asyncio loop from main
-        pass
+    # The old stop_on_key logic (asyncio.get_event_loop().add_reader) is fully removed.
+    # The duration logic is now handled in run_async_tasks_in_thread.
+    # The primary stop trigger for the main thread is closing the plot window.
 
     # schedule tasks
     # task = worker_loop(keys, url, total_requests, concurrency, crescendo,
@@ -238,18 +251,25 @@ def main(api_keys_file, api_keys, total_requests, concurrency, crescendo,
     thread.daemon = True # So it exits when main thread exits, if not joined
     thread.start()
 
-    time.sleep(0.1) # Give thread a chance to start and populate shared_context
-    background_loop = shared_context.get('loop')
+    if live_plot_enabled:
+        time.sleep(0.1) # Give thread a chance to start and populate shared_context
+        background_loop = shared_context.get('loop')
 
-    start_plot() # This will block the main thread until plot window is closed
+        start_plot() # This will block the main thread until plot window is closed
 
-    # After plot window is closed by user, or if duration timer fired
-    if background_loop and background_loop.is_running():
-        click.echo("Plot closed or duration reached, signaling worker thread to stop...")
-        background_loop.call_soon_threadsafe(stop_event.set)
+        # After plot window is closed by user (or if duration timer already fired in thread)
+        if background_loop and background_loop.is_running():
+            click.echo("Plot closed, signaling worker thread to stop...")
+            background_loop.call_soon_threadsafe(stop_event.set)
+    else:
+        # If plotting is disabled, the main thread still needs to wait for the duration or total_requests.
+        # The stop_event will be set by the duration timer in the worker thread,
+        # or the worker_loop will exit naturally after total_requests.
+        # If neither duration nor total_requests is set, Ctrl+C will be needed.
+        pass # No specific action needed here for main thread to signal stop
 
     click.echo("Waiting for worker thread to finish...")
-    thread.join() # Wait for the background thread to complete
+    thread.join() # Wait for the background thread to complete, regardless of plotting
 
     # export CSV if asked
     if export_csv:
