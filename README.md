@@ -3,9 +3,9 @@
 ## Features
 - Async + HTTPX for high throughput
 - Backoff strategies (fixed, exponential, decorrelated jitter)
-- Cumulative requests, avg/p50/p90/p99 latencies, error rate
-- Real-time plotting / CSV export of raw metrics
-- Run by request count or duration
+- Real-time plotting: cumulative requests, avg/p50/p90/p99 latencies, error rate
+- Run by count, duration, or Ctrl+C
+- CSV & PNG export plot graphs
 
 ### Backoff Strategies
 - **Fixed**: sleep a constant `base` seconds each retry.
@@ -62,10 +62,19 @@ python stress_test.py -f api_keys.txt -n 2000 -c 100 --crescendo \
 ## Mock Server for Local Testing
 
 Included is a simple **FastAPI** mock server you can run locally to test the stress-test client.
-It simulates random latency and occasional errors.
+It simulates random latency and occasional errors. You can configure its behavior using the following environment variables when starting the server:
+
+-   `MIN_LATENCY`: Minimum simulated latency in seconds (float, default: 0.01).
+-   `MAX_LATENCY`: Maximum simulated latency in seconds (float, default: 0.5).
+-   `ERROR_RATE`: Probability of the server returning an error (float, 0.0 to 1.0, default: 0.1, meaning 10% error rate).
+
+Example of running the mock server with custom settings:
+```bash
+MIN_LATENCY=0.1 MAX_LATENCY=0.3 ERROR_RATE=0.05 python mock_server.py
+```
 
 Start Mock Server: 
 - `python mock_server.py`
 
 Example Stress Test against Mock Server:
-- `python stress_test.py -k your_api_key -n 1000 -c 50 --crescendo -e /test --base-url http://127.0.0.1:8008 --duration 30 --export-csv mock_test_data.csv`
+- `python stress_test.py -k your_api_key -n 1000 -c 50 --crescendo -e /test --base-url http://127.0.0.1:8000 --duration 30 --export-csv mock_test_data.csv`

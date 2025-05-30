@@ -1,5 +1,4 @@
 click
 httpx[http2]
 matplotlib
-fastapi
-uvicorn
+fastapi[all]

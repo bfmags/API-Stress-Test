@@ -280,15 +280,6 @@ def main(api_keys_file, api_keys, total_requests, concurrency, crescendo,
     url = base_url.rstrip('/') + endpoint
     start_time = time.time()
 
-    # stop triggers
-    # The old stop_on_key logic (asyncio.get_event_loop().add_reader) is fully removed.
-    # The duration logic is now handled in run_async_tasks_in_thread.
-    # The primary stop trigger for the main thread is closing the plot window.
-
-    # schedule tasks
-    # task = worker_loop(keys, url, total_requests, concurrency, crescendo,
-    # retries, backoff_method, backoff_base, backoff_cap) # Not run directly in main
-
     shared_context = {}
     # Start the asynchronous tasks in a new thread
     thread = threading.Thread(
