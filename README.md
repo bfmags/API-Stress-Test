@@ -62,7 +62,18 @@ python stress_test.py -f api_keys.txt -n 2000 -c 100 --crescendo \
 ## Mock Server for Local Testing
 
 Included is a simple **FastAPI** mock server you can run locally to test the stress-test client.
-It simulates random latency and occasional errors.
+It simulates random latency and occasional errors. You can configure its behavior using the following environment variables when starting the server:
+
+-   `MIN_LATENCY`: Minimum simulated latency in seconds (float, default: 0.01).
+-   `MAX_LATENCY`: Maximum simulated latency in seconds (float, default: 0.5).
+-   `ERROR_RATE`: Probability of the server returning an error (float, 0.0 to 1.0, default: 0.1, meaning 10% error rate).
+
+Example of running the mock server with custom settings:
+```bash
+MIN_LATENCY=0.1 MAX_LATENCY=0.3 ERROR_RATE=0.05 python mock_server.py
+```
+
+Note: While `stress_test.py` has corresponding command-line arguments (`--min-latency`, `--max-latency`, `--error-rate`), these are primarily for discoverability and to inform you of these settings. The actual configuration of the mock server's behavior must be done by setting the environment variables as shown above when launching `mock_server.py` itself.
 
 Start Mock Server: 
 - `python mock_server.py`
