@@ -2,6 +2,7 @@ import asyncio
 import csv
 import sys
 import random
+import threading
 import time
 from pathlib import Path
 from itertools import cycle
@@ -153,14 +154,26 @@ def start_plot():
     plt.show()
 
 
-async def async_main(keys, url, total_requests, concurrency, crescendo,
-                     retries, backoff_method, backoff_base, backoff_cap,
-                     stop_event, start_plot):
-    """Run the worker loop and plotting concurrently."""
+def run_async_tasks_in_thread(keys, url, total_requests, concurrency, crescendo,
+                              retries, backoff_method, backoff_base, backoff_cap,
+                              stop_event_arg, duration_arg, shared_context_arg):
+    """Runs the asyncio worker_loop in a separate thread."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    shared_context_arg['loop'] = loop
+
+    # Ensure global stop_event is used by this loop
+    # stop_event is already global, asyncio.set_event_loop ensures it's associated.
+
+    if duration_arg:
+        loop.call_later(duration_arg, stop_event_arg.set)
+
     task = worker_loop(keys, url, total_requests, concurrency, crescendo,
                        retries, backoff_method, backoff_base, backoff_cap)
-    plot_task = asyncio.to_thread(start_plot)
-    await asyncio.gather(task, plot_task)
+    try:
+        loop.run_until_complete(task)
+    finally:
+        loop.close()
 
 
 @click.command()
@@ -200,17 +213,43 @@ def main(api_keys_file, api_keys, total_requests, concurrency, crescendo,
 
     # stop triggers
     if stop_on_key:
-        asyncio.get_event_loop().add_reader(sys.stdin, lambda: stop_event.set())
+        # asyncio.get_event_loop().add_reader(sys.stdin, lambda: stop_event.set()) # No asyncio loop from main
+        pass
     if duration:
-        asyncio.get_event_loop().call_later(duration, stop_event.set)
+        # asyncio.get_event_loop().call_later(duration, stop_event.set) # No asyncio loop from main
+        pass
 
     # schedule tasks
     # task = worker_loop(keys, url, total_requests, concurrency, crescendo,
-    # retries, backoff_method, backoff_base, backoff_cap) # Moved to async_main
+    # retries, backoff_method, backoff_base, backoff_cap) # Not run directly in main
 
-    asyncio.run(async_main(keys, url, total_requests, concurrency, crescendo,
-                           retries, backoff_method, backoff_base, backoff_cap,
-                           stop_event, start_plot))
+    shared_context = {}
+    # Start the asynchronous tasks in a new thread
+    thread = threading.Thread(
+        target=run_async_tasks_in_thread,
+        args=(
+            keys, url, total_requests, concurrency, crescendo,
+            retries, backoff_method, backoff_base, backoff_cap,
+            stop_event,  # Pass the global asyncio.Event
+            duration,    # Pass duration
+            shared_context # Pass shared_context
+        )
+    )
+    thread.daemon = True # So it exits when main thread exits, if not joined
+    thread.start()
+
+    time.sleep(0.1) # Give thread a chance to start and populate shared_context
+    background_loop = shared_context.get('loop')
+
+    start_plot() # This will block the main thread until plot window is closed
+
+    # After plot window is closed by user, or if duration timer fired
+    if background_loop and background_loop.is_running():
+        click.echo("Plot closed or duration reached, signaling worker thread to stop...")
+        background_loop.call_soon_threadsafe(stop_event.set)
+
+    click.echo("Waiting for worker thread to finish...")
+    thread.join() # Wait for the background thread to complete
 
     # export CSV if asked
     if export_csv:
