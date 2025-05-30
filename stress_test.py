@@ -260,13 +260,9 @@ def print_summary_stats(results_deque, latencies_list, status_counts_counter):
 @click.option('--duration', type=int, default=None, help='Run for N seconds')
 @click.option('--live-plot/--no-live-plot', 'live_plot_enabled', default=True, help='Enable or disable live plotting window.')
 @click.option('--export-csv', type=click.Path(), default=None, help='Export raw CSV')
-@click.option('--min-latency', type=float, help="Minimum latency for the mock server (seconds). Configure on mock_server.py via MIN_LATENCY env var.")
-@click.option('--max-latency', type=float, help="Maximum latency for the mock server (seconds). Configure on mock_server.py via MAX_LATENCY env var.")
-@click.option('--error-rate', type=float, help="Error rate for the mock server (0.0 to 1.0). Configure on mock_server.py via ERROR_RATE env var.")
 def main(api_keys_file, api_keys, total_requests, concurrency, crescendo,
          endpoint, base_url, retries, backoff_method, backoff_base,
-         backoff_cap, duration, live_plot_enabled, export_csv,
-         min_latency, max_latency, error_rate): # Added new params here
+         backoff_cap, duration, live_plot_enabled, export_csv):
     """CLI wrapper: parse, set stop conditions, launch worker & plotting."""
     global start_time
     # Load keys
@@ -283,15 +279,6 @@ def main(api_keys_file, api_keys, total_requests, concurrency, crescendo,
 
     url = base_url.rstrip('/') + endpoint
     start_time = time.time()
-
-    # stop triggers
-    # The old stop_on_key logic (asyncio.get_event_loop().add_reader) is fully removed.
-    # The duration logic is now handled in run_async_tasks_in_thread.
-    # The primary stop trigger for the main thread is closing the plot window.
-
-    # schedule tasks
-    # task = worker_loop(keys, url, total_requests, concurrency, crescendo,
-    # retries, backoff_method, backoff_base, backoff_cap) # Not run directly in main
 
     shared_context = {}
     # Start the asynchronous tasks in a new thread

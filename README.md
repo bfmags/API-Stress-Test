@@ -4,7 +4,7 @@
 - Async + HTTPX for high throughput
 - Backoff strategies (fixed, exponential, decorrelated jitter)
 - Real-time plotting: cumulative requests, avg/p50/p90/p99 latencies, error rate
-- Run by count, duration, or user break
+- Run by count, duration, or Ctrl+C
 - CSV & PNG export plot graphs
 
 ### Backoff Strategies
@@ -73,10 +73,8 @@ Example of running the mock server with custom settings:
 MIN_LATENCY=0.1 MAX_LATENCY=0.3 ERROR_RATE=0.05 python mock_server.py
 ```
 
-Note: While `stress_test.py` has corresponding command-line arguments (`--min-latency`, `--max-latency`, `--error-rate`), these are primarily for discoverability and to inform you of these settings. The actual configuration of the mock server's behavior must be done by setting the environment variables as shown above when launching `mock_server.py` itself.
-
 Start Mock Server: 
 - `python mock_server.py`
 
 Example Stress Test against Mock Server:
-- `python stress_test.py -k your_api_key -n 1000 -c 50 --crescendo -e /test --base-url http://127.0.0.1:8008 --duration 30 --export-csv mock_test_data.csv`
+- `python stress_test.py -k your_api_key -n 1000 -c 50 --crescendo -e /test --base-url http://127.0.0.1:8000 --duration 30 --export-csv mock_test_data.csv`
