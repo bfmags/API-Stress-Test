@@ -3,10 +3,9 @@
 ## Features
 - Async + HTTPX for high throughput
 - Backoff strategies (fixed, exponential, decorrelated jitter)
-- Real-time plotting (optional): cumulative requests, avg/p50/p90/p99 latencies, error rate
-- Summary statistics printout at the end of the test.
-- Run by request count or duration.
-- CSV export of raw metrics.
+- Cumulative requests, avg/p50/p90/p99 latencies, error rate
+- Real-time plotting / CSV export of raw metrics
+- Run by request count or duration
 
 ### Backoff Strategies
 - **Fixed**: sleep a constant `base` seconds each retry.
@@ -16,7 +15,7 @@
 ### Real-Time Plotting (Optional)
 When enabled (default), the tool displays:
 - **Cumulative requests**
-- **Avg latency**, **p50**, **p90**, **p99** (explained below)
+- **Avg latency**, **p50**, **p90**, **p99**
 - **Status counts** & **error rate** (failures/total)
 
 ## Understanding Latency Metrics
@@ -33,7 +32,6 @@ cd <repository_directory_name>
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 ```
-*(Ensure `requirements.txt` is up-to-date with `click`, `httpx`, `matplotlib`)*
 
 ## Usage
 Example:
@@ -70,5 +68,4 @@ Start Mock Server:
 - `python mock_server.py`
 
 Example Stress Test against Mock Server:
-- `python stress_test.py -k your_api_key -n 1000 -c 50 --crescendo -e /items --base-url http://127.0.0.1:8008 --duration 30 --export-csv mock_test_data.csv`
-*(Note: The mock server in `mock_server.py` runs on port 8008 and has an `/items` endpoint)*
+- `python stress_test.py -k your_api_key -n 1000 -c 50 --crescendo -e /test --base-url http://127.0.0.1:8008 --duration 30 --export-csv mock_test_data.csv`
