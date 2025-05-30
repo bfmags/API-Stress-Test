@@ -153,6 +153,16 @@ def start_plot():
     plt.show()
 
 
+async def async_main(keys, url, total_requests, concurrency, crescendo,
+                     retries, backoff_method, backoff_base, backoff_cap,
+                     stop_event, start_plot):
+    """Run the worker loop and plotting concurrently."""
+    task = worker_loop(keys, url, total_requests, concurrency, crescendo,
+                       retries, backoff_method, backoff_base, backoff_cap)
+    plot_task = asyncio.to_thread(start_plot)
+    await asyncio.gather(task, plot_task)
+
+
 @click.command()
 @click.option('-f', '--api-keys-file', type=click.Path(exists=True), help='File with one API key per line')
 @click.option('-k', '--api-keys', help='Comma-separated API keys')
@@ -195,12 +205,12 @@ def main(api_keys_file, api_keys, total_requests, concurrency, crescendo,
         asyncio.get_event_loop().call_later(duration, stop_event.set)
 
     # schedule tasks
-    task = worker_loop(keys, url, total_requests, concurrency, crescendo,
-                       retries, backoff_method, backoff_base, backoff_cap)
-    # run producer + plotter
-    plot_task = asyncio.to_thread(start_plot)
+    # task = worker_loop(keys, url, total_requests, concurrency, crescendo,
+    # retries, backoff_method, backoff_base, backoff_cap) # Moved to async_main
 
-    asyncio.run(asyncio.gather(task, plot_task))
+    asyncio.run(async_main(keys, url, total_requests, concurrency, crescendo,
+                           retries, backoff_method, backoff_base, backoff_cap,
+                           stop_event, start_plot))
 
     # export CSV if asked
     if export_csv:
