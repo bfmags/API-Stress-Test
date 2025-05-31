@@ -3,3 +3,4 @@ httpx[http2]
 matplotlib
 fastapi[all]
 pytest
+pytest-mock

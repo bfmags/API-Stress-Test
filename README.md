@@ -53,7 +53,9 @@ python stress_test.py -f api_keys.txt -n 2000 -c 100 \
     - `sin`: Traffic follows a sine wave pattern. The load will oscillate, completing a few cycles over the test duration.
     - `cos`: Traffic follows a cosine wave pattern, similar to `sin` but phase-shifted.
     - `fourier`: Traffic follows a simple Fourier series (sum of two sine waves), creating a more complex repeating pattern.
-    - `random_cycle`: At the start of the test, randomly selects one of `sin`, `cos`, or `fourier` to use for the duration.
+    - `random_cycle`:
+        - If a `--duration` is specified for the test, this mode will sequentially cycle through the `sin`, `cos`, and `fourier` patterns. Each pattern will run for an equal segment of the total test duration (e.g., if duration is 30s, each pattern runs for 10s). The sequence is sin -> cos -> fourier, and it will repeat if the total duration allows for multiple full cycles.
+        - If no `--duration` is specified (e.g., the test is run for a fixed number of `--total-requests`), `random_cycle` will pick one pattern at random from the sequence (`sin`, `cos`, or `fourier`) and use that single pattern for the entire test run.
     - This option works best when a `--duration` is specified, as patterns are scaled to fit the duration. The `--concurrency` option sets the peak for these patterns. Using `--traffic-pattern linear` is equivalent to the old crescendo behavior.
 - `-e, --endpoint TEXT`: API endpoint path (e.g., `/users`). Required.
 - `--base-url TEXT`: API base URL (e.g., `http://127.0.0.1:8000`). Default: `http://127.0.0.1:8000`.

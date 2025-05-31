@@ -172,3 +172,112 @@ def test_worker_loop_concurrency_always_at_least_1():
     # For cos pattern at t_progress = 0.5 (with 3 cycles), factor is (cos(3pi)+1)/2 = 0
     t_progress_yields_zero_factor_cos = 0.5
     assert calculate_concurrency_for_test("cos", t_progress_yields_zero_factor_cos, max_conc) == 1
+
+# --- Test for sequential random_cycle behavior ---
+
+def test_random_cycle_sequential_behavior(mocker):
+    """
+    Tests the sequential cycling behavior of 'random_cycle' mode.
+    It simulates time passing and checks if patterns switch correctly and
+    if t_progress and concurrency are calculated as expected for each segment.
+    """
+    # --- Test Setup ---
+    mock_time = mocker.patch('stress_test.time.time') # Patch time in stress_test module
+
+    # Parameters similar to what worker_loop would receive/use
+    initial_start_time = 1000.0 # Arbitrary start time
+    test_duration = 30.0        # Total test duration
+    max_concurrency = 100
+
+    pattern_sequence = ["sin", "cos", "fourier"]
+    num_patterns_in_cycle = len(pattern_sequence)
+    segment_duration = test_duration / num_patterns_in_cycle # Should be 10.0s
+
+    # Simulate state variables from worker_loop
+    _active_pattern_key = pattern_sequence[0]
+    _pattern_function = TRAFFIC_PATTERNS[_active_pattern_key]
+    _current_pattern_index = 0
+    _segment_start_time = initial_start_time
+
+    # --- Simulation Loop ---
+    # Simulate calls at different points in time
+    # t_values are relative to initial_start_time
+    simulated_time_points = [
+        # Start of sin pattern
+        0.0,        # active: sin, seg_t_progress: 0.0
+        5.0,        # active: sin, seg_t_progress: 0.5
+        9.9,        # active: sin, seg_t_progress: ~0.99
+        # Transition to cos pattern
+        10.0,       # active: cos, seg_t_progress: 0.0
+        15.0,       # active: cos, seg_t_progress: 0.5
+        19.9,       # active: cos, seg_t_progress: ~0.99
+        # Transition to fourier pattern
+        20.0,       # active: fourier, seg_t_progress: 0.0
+        25.0,       # active: fourier, seg_t_progress: 0.5
+        29.9,       # active: fourier, seg_t_progress: ~0.99
+        # Optional: check one more transition back to sin if duration allows
+        30.0        # active: sin (loops back), seg_t_progress: 0.0
+    ]
+
+    expected_states = [
+        # (expected_active_pattern, expected_segment_t_progress_approx)
+        ("sin", 0.0), ("sin", 0.5), ("sin", 0.99),
+        ("cos", 0.0), ("cos", 0.5), ("cos", 0.99),
+        ("fourier", 0.0), ("fourier", 0.5), ("fourier", 0.99),
+        ("sin", 0.0) # Loops back
+    ]
+
+    assert len(simulated_time_points) == len(expected_states), "Test data length mismatch"
+
+    for i, time_elapsed_in_test in enumerate(simulated_time_points):
+        current_simulated_time = initial_start_time + time_elapsed_in_test
+        mock_time.return_value = current_simulated_time
+
+        # --- Logic mirrored from worker_loop's cycle & t_progress ---
+        # 1. Check for pattern switch
+        if segment_duration > 0: # segment_duration is positive here
+            current_segment_elapsed_time = current_simulated_time - _segment_start_time
+            if current_segment_elapsed_time >= segment_duration:
+                _current_pattern_index += 1
+                if _current_pattern_index >= num_patterns_in_cycle:
+                    _current_pattern_index = 0 # Loop back
+
+                _active_pattern_key = pattern_sequence[_current_pattern_index]
+                _pattern_function = TRAFFIC_PATTERNS[_active_pattern_key]
+                _segment_start_time = current_simulated_time
+                # When a switch happens, the elapsed time for the NEW segment is 0
+                current_segment_elapsed_time = 0
+
+        # 2. Calculate current_pattern_t_progress for the active segment
+        # (Simplified: assumes cycle_patterns_sequentially=True and segment_duration > 0)
+        _current_pattern_t_progress = min(current_segment_elapsed_time / segment_duration, 1.0)
+        if segment_duration == 0: _current_pattern_t_progress = 1.0 # Avoid division by zero if somehow segment_duration is 0
+
+        # --- Assertions ---
+        expected_pattern, expected_t_progress = expected_states[i]
+        assert _active_pattern_key == expected_pattern, \
+            f"Time {time_elapsed_in_test:.1f}s: Expected pattern '{expected_pattern}', got '{_active_pattern_key}'"
+        assert _current_pattern_t_progress == pytest.approx(expected_t_progress, abs=0.01), \
+            f"Time {time_elapsed_in_test:.1f}s ({_active_pattern_key}): Expected t_progress {expected_t_progress:.2f}, got {_current_pattern_t_progress:.2f}"
+
+        # 3. Calculate and check concurrency
+        # (Using default cycles for pattern functions as worker_loop does)
+        # Determine cycles based on active pattern key
+        if _active_pattern_key in ["sin", "cos"]:
+            cycles_for_pattern = DEFAULT_CYCLES
+        elif _active_pattern_key == "fourier":
+            cycles_for_pattern = FOURIER_CYCLES
+        else: # linear or other patterns that don't use cycles
+            pattern_scaling_factor = _pattern_function(_current_pattern_t_progress)
+            calculated_concurrency = max(1, int(pattern_scaling_factor * max_concurrency))
+            assert 1 <= calculated_concurrency <= max_concurrency, \
+                f"Time {time_elapsed_in_test:.1f}s ({_active_pattern_key}): Concurrency {calculated_concurrency} out of range [1, {max_concurrency}]"
+            continue # Skip cycle-based calculation for linear
+
+        pattern_scaling_factor = _pattern_function(_current_pattern_t_progress, cycles=cycles_for_pattern)
+        calculated_concurrency = max(1, int(pattern_scaling_factor * max_concurrency))
+
+        assert 1 <= calculated_concurrency <= max_concurrency, \
+            f"Time {time_elapsed_in_test:.1f}s ({_active_pattern_key}): Concurrency {calculated_concurrency} out of range [1, {max_concurrency}]"
+
+        # print(f"T={time_elapsed_in_test:.1f}s, MockT={current_simulated_time:.1f}, Active='{_active_pattern_key}', SegStartT={_segment_start_time:.1f}, SegElapsed={current_segment_elapsed_time:.2f}, SegTProgress={_current_pattern_t_progress:.2f}, Concurrency={calculated_concurrency}")

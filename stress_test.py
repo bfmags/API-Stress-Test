@@ -147,34 +147,73 @@ async def worker_loop(keys, url, total, concurrency,
     key_cycle = cycle(keys)
     count = 0
 
-    selected_pattern_key = traffic_pattern
-    if traffic_pattern == "random_cycle":
-        available_patterns = [p for p in TRAFFIC_PATTERNS.keys() if p != "linear"] # Exclude linear from random cycling
-        if not available_patterns: # Fallback if only linear is defined
-            selected_pattern_key = "linear"
-        else:
-            selected_pattern_key = random.choice(available_patterns)
+    # Initialization for the selected traffic pattern (or random_cycle sequence)
+    pattern_sequence = ["sin", "cos", "fourier"] # Order of patterns for cycling
+    num_patterns_in_cycle = len(pattern_sequence)
+    current_pattern_index = 0
+    segment_duration = 0  # Duration for each pattern segment in random_cycle
+    cycle_patterns_sequentially = False # Flag to indicate if sequential cycling is active
+    # segment_start_time will track the start of the current pattern segment
+    # Initialize it to the overall start_time, will be updated when patterns switch
+    segment_start_time = start_time
 
-    pattern_function = TRAFFIC_PATTERNS[selected_pattern_key]
+    _selected_pattern_key = traffic_pattern # Use a temporary variable for clarity
+
+    if _selected_pattern_key == "random_cycle":
+        if duration and duration > 0 and num_patterns_in_cycle > 0:
+            segment_duration = duration / num_patterns_in_cycle
+            cycle_patterns_sequentially = True
+            _selected_pattern_key = pattern_sequence[current_pattern_index]
+            # Optional: print a message to indicate mode of operation
+            # print(f"Random_cycle: Starting with '{_selected_pattern_key}'. Each pattern runs for {segment_duration:.2f}s.")
+        else:
+            # Fallback: if no duration for random_cycle, pick one pattern from the sequence and stick to it
+            # This is a slight change from 'any non-linear'; now it picks from the cycle sequence.
+            _selected_pattern_key = random.choice(pattern_sequence) if num_patterns_in_cycle > 0 else "linear"
+            # Optional: print a message
+            # print(f"Random_cycle (no duration or no patterns): Fallback to single pattern '{_selected_pattern_key}'.")
+
+    # This variable will hold the actual key for TRAFFIC_PATTERNS lookup
+    active_pattern_key = _selected_pattern_key
+    pattern_function = TRAFFIC_PATTERNS[active_pattern_key]
 
     # Global start_time is used here
     # duration is passed as a parameter
 
     async with httpx.AsyncClient() as client:
         while not stop_event.is_set() and (total is None or count < total):
-            count += 1
+            # count incremented later, after tasks are gathered, to represent batches/iterations
 
-            # Calculate t_progress
-            elapsed_time = time.time() - start_time
-            t_progress = 1.0 # Default if no duration and not linear with total
-            if duration and duration > 0:
-                t_progress = min(elapsed_time / duration, 1.0)
-            elif total and total > 0: # If duration not set, try to use total_requests for linear
-                if selected_pattern_key == 'linear':
-                    t_progress = min(count / total, 1.0)
-                # else: t_progress remains 1.0 for other patterns if no duration and not linear
+            current_time = time.time() # Get current time once per iteration
 
-            pattern_scaling_factor = pattern_function(t_progress)
+            if cycle_patterns_sequentially and segment_duration > 0:
+                current_segment_elapsed_time = current_time - segment_start_time
+                if current_segment_elapsed_time >= segment_duration:
+                    current_pattern_index += 1
+                    if current_pattern_index >= num_patterns_in_cycle:
+                        current_pattern_index = 0 # Loop back to the first pattern
+
+                    active_pattern_key = pattern_sequence[current_pattern_index]
+                    pattern_function = TRAFFIC_PATTERNS[active_pattern_key]
+                    segment_start_time = current_time # Reset segment start time
+                    # Optional: print(f"Random_cycle: Switched to pattern '{active_pattern_key}' at {current_time:.2f}")
+                    # current_segment_elapsed_time is effectively 0 for the new segment's t_progress.
+
+            # Calculate t_progress for the current active pattern
+            current_pattern_t_progress = 1.0 # Default if no other calculation applies
+
+            if cycle_patterns_sequentially and segment_duration > 0:
+                # For sequential cycling, t_progress is relative to the current segment
+                _seg_elapsed = current_time - segment_start_time # Time elapsed in current segment
+                current_pattern_t_progress = min(_seg_elapsed / segment_duration, 1.0)
+            elif duration and duration > 0: # For non-cycling patterns with overall duration
+                total_elapsed_time = current_time - start_time
+                current_pattern_t_progress = min(total_elapsed_time / duration, 1.0)
+            elif total and total > 0 and active_pattern_key == 'linear': # For linear pattern with total requests (no duration)
+                current_pattern_t_progress = min(count / total, 1.0)
+            # else: current_pattern_t_progress remains 1.0 (e.g., non-linear pattern without duration)
+
+            pattern_scaling_factor = pattern_function(current_pattern_t_progress)
 
             current_max_concurrency = concurrency # Max concurrency from CLI
             current_concurrency = max(1, int(pattern_scaling_factor * current_max_concurrency))
@@ -190,6 +229,7 @@ async def worker_loop(keys, url, total, concurrency,
                 )
             # fire and forget
             await asyncio.gather(*tasks)
+            count += 1 # Increment count after a batch of tasks representing one iteration/step for t_progress in total-based linear mode
             await asyncio.sleep(0.1)
 
 
