@@ -141,7 +141,7 @@ async def fetch_once(client: httpx.AsyncClient, url: str,
         return
 
 
-async def worker_loop(keys, url, total, concurrency, crescendo,
+async def worker_loop(keys, url, total, concurrency,
                       retries, backoff_method, base, cap, traffic_pattern, duration):
     """Continuously schedule `fetch_once` tasks until stop_event."""
     key_cycle = cycle(keys)
@@ -253,7 +253,7 @@ def start_plot():
     plt.show()
 
 
-def run_async_tasks_in_thread(keys, url, total_requests, concurrency, crescendo,
+def run_async_tasks_in_thread(keys, url, total_requests, concurrency,
                               retries, backoff_method, backoff_base, backoff_cap,
                               stop_event_arg, duration_arg, shared_context_arg, traffic_pattern):
     """Runs the asyncio worker_loop in a separate thread."""
@@ -267,7 +267,7 @@ def run_async_tasks_in_thread(keys, url, total_requests, concurrency, crescendo,
     if duration_arg:
         loop.call_later(duration_arg, stop_event_arg.set)
 
-    task = worker_loop(keys, url, total_requests, concurrency, crescendo,
+    task = worker_loop(keys, url, total_requests, concurrency,
                        retries, backoff_method, backoff_base, backoff_cap, traffic_pattern, duration_arg)
     try:
         loop.run_until_complete(task)
@@ -333,7 +333,7 @@ def print_summary_stats(results_deque, latencies_list, status_counts_counter):
 @click.option('-k', '--api-keys', help='Comma-separated API keys')
 @click.option('-n', '--total-requests', type=int, default=None, help='Total requests (omit for duration)')
 @click.option('-c', '--concurrency', type=int, default=50, help='Concurrent requests')
-@click.option('--crescendo/--no-crescendo', default=False, help='Ramp up concurrency')
+# --crescendo option removed
 @click.option('-e', '--endpoint', required=True, help='API endpoint (e.g. /users)')
 @click.option('--base-url', default='http://127.0.0.1:8000 ', help='API root URL')
 @click.option('--retries', type=int, default=3, help='Retry count')
@@ -347,7 +347,7 @@ def print_summary_stats(results_deque, latencies_list, status_counts_counter):
               type=click.Choice(PATTERN_CHOICES, case_sensitive=False),
               default='linear',
               help='Traffic pattern to simulate. "random_cycle" will pick randomly from defined patterns.')
-def main(api_keys_file, api_keys, total_requests, concurrency, crescendo,
+def main(api_keys_file, api_keys, total_requests, concurrency, # crescendo removed
          endpoint, base_url, retries, backoff_method, backoff_base,
          backoff_cap, duration, live_plot_enabled, export_csv, traffic_pattern):
     """CLI wrapper: parse, set stop conditions, launch worker & plotting."""
@@ -372,7 +372,7 @@ def main(api_keys_file, api_keys, total_requests, concurrency, crescendo,
     thread = threading.Thread(
         target=run_async_tasks_in_thread,
         args=(
-            keys, url, total_requests, concurrency, crescendo,
+            keys, url, total_requests, concurrency, # crescendo removed
             retries, backoff_method, backoff_base, backoff_cap,
             stop_event,  # Pass the global asyncio.Event
             duration,    # Pass duration
