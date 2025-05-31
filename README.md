@@ -48,7 +48,14 @@ python stress_test.py -f api_keys.txt -n 2000 -c 100 --crescendo \
 - `-k, --api-keys TEXT`: Comma-separated API keys.
 - `-n, --total-requests INTEGER`: Total number of requests to send. If omitted, the test runs for the specified `--duration` or until manually interrupted (if plotting is also disabled).
 - `-c, --concurrency INTEGER`: Number of concurrent requests to maintain. Default: 50.
-- `--crescendo / --no-crescendo`: Gradually ramp up concurrency to the target. Default: False.
+- `--crescendo / --no-crescendo`: Gradually ramp up concurrency. Default: False. (Note: This is now implicitly handled by `--traffic-pattern linear`. This flag may be deprecated in future versions.)
+- --traffic-pattern [linear|sin|cos|fourier|random_cycle]: Defines the pattern of requests over time. Default: `linear`.
+    - `linear`: A linear ramp-up of traffic, similar to the old `--crescendo` flag. This is the default behavior if `--traffic-pattern` is not specified.
+    - `sin`: Traffic follows a sine wave pattern. The load will oscillate, completing a few cycles over the test duration.
+    - `cos`: Traffic follows a cosine wave pattern, similar to `sin` but phase-shifted.
+    - `fourier`: Traffic follows a simple Fourier series (sum of two sine waves), creating a more complex repeating pattern.
+    - `random_cycle`: At the start of the test, randomly selects one of `sin`, `cos`, or `fourier` to use for the duration.
+    - This option works best when a `--duration` is specified, as patterns are scaled to fit the duration. The `--concurrency` option sets the peak for these patterns. The original `--crescendo` flag is now implicitly managed; using `--traffic-pattern linear` is equivalent to the old `--crescendo`.
 - `-e, --endpoint TEXT`: API endpoint path (e.g., `/users`). Required.
 - `--base-url TEXT`: API base URL (e.g., `http://127.0.0.1:8000`). Default: `http://127.0.0.1:8000`.
 - `--retries INTEGER`: Number of retries for failed requests. Default: 3.

@@ -1,6 +1,7 @@
 import asyncio
 import csv
 import sys
+import math # Add this import at the top of the file if not already present
 import random
 import threading
 import time
@@ -40,6 +41,64 @@ BACKOFF_METHODS = {
     'exponential': exp_backoff,
     'jitter': jitter_backoff,
 }
+
+# --- Mathematical Pattern Functions ---
+
+def pattern_sin(t_progress: float, cycles: int = 3) -> float:
+    """
+    Generates a sine wave pattern scaling factor.
+    t_progress: Normalized time, from 0.0 to 1.0, representing test progress.
+    cycles: Number of full sine wave cycles over the total duration.
+    Returns a scaling factor between 0.0 and 1.0.
+    """
+    # sin(x) ranges from -1 to 1. We want 0 to 1. So (sin(x) + 1) / 2.
+    return (math.sin(t_progress * cycles * 2 * math.pi) + 1) / 2
+
+def pattern_cos(t_progress: float, cycles: int = 3) -> float:
+    """
+    Generates a cosine wave pattern scaling factor.
+    t_progress: Normalized time, from 0.0 to 1.0, representing test progress.
+    cycles: Number of full cosine wave cycles over the total duration.
+    Returns a scaling factor between 0.0 and 1.0.
+    """
+    # cos(x) ranges from -1 to 1. We want 0 to 1. So (cos(x) + 1) / 2.
+    return (math.cos(t_progress * cycles * 2 * math.pi) + 1) / 2
+
+def pattern_fourier_simple(t_progress: float, cycles: int = 2) -> float:
+    """
+    Generates a simple Fourier series-like pattern scaling factor.
+    A sum of two sine waves with different frequencies and amplitudes.
+    t_progress: Normalized time, from 0.0 to 1.0, representing test progress.
+    cycles: Base number of cycles for the fundamental frequency.
+    Returns a scaling factor normalized to be mostly between 0.0 and 1.0.
+    """
+    # Base sine wave: amplitude 0.6, frequency `cycles`
+    val1 = 0.6 * (math.sin(t_progress * cycles * 2 * math.pi) + 1) / 2
+    # Second harmonic: amplitude 0.4, frequency `cycles * 2`
+    val2 = 0.4 * (math.sin(t_progress * (cycles * 2) * 2 * math.pi) + 1) / 2
+
+    # Summing them up. Max sum is 1.0. Min sum is 0.0.
+    result = val1 + val2
+    # Clip to ensure it's within [0,1] due to potential floating point inaccuracies
+    return max(0.0, min(1.0, result))
+
+def pattern_linear(t_progress: float) -> float:
+    """
+    Generates a linear scaling factor (equivalent to current crescendo).
+    t_progress: Normalized time, from 0.0 to 1.0.
+    Returns a scaling factor from 0.0 to 1.0.
+    """
+    return t_progress
+
+# Dictionary to hold pattern functions
+TRAFFIC_PATTERNS = {
+    "sin": pattern_sin,
+    "cos": pattern_cos,
+    "fourier": pattern_fourier_simple,
+    "linear": pattern_linear, # For the existing crescendo behavior
+}
+
+PATTERN_CHOICES = list(TRAFFIC_PATTERNS.keys()) + ['random_cycle'] # Define this list here
 
 stop_event = asyncio.Event()
 results = deque()
@@ -83,22 +142,46 @@ async def fetch_once(client: httpx.AsyncClient, url: str,
 
 
 async def worker_loop(keys, url, total, concurrency, crescendo,
-                      retries, backoff_method, base, cap):
+                      retries, backoff_method, base, cap, traffic_pattern, duration):
     """Continuously schedule `fetch_once` tasks until stop_event."""
     key_cycle = cycle(keys)
     count = 0
+
+    selected_pattern_key = traffic_pattern
+    if traffic_pattern == "random_cycle":
+        available_patterns = [p for p in TRAFFIC_PATTERNS.keys() if p != "linear"] # Exclude linear from random cycling
+        if not available_patterns: # Fallback if only linear is defined
+            selected_pattern_key = "linear"
+        else:
+            selected_pattern_key = random.choice(available_patterns)
+
+    pattern_function = TRAFFIC_PATTERNS[selected_pattern_key]
+
+    # Global start_time is used here
+    # duration is passed as a parameter
+
     async with httpx.AsyncClient() as client:
         while not stop_event.is_set() and (total is None or count < total):
             count += 1
-            # determine current concurrency
-            if crescendo and total:
-                current = max(1, min(concurrency, int(count/total * concurrency)))
-            else:
-                current = concurrency
+
+            # Calculate t_progress
+            elapsed_time = time.time() - start_time
+            t_progress = 1.0 # Default if no duration and not linear with total
+            if duration and duration > 0:
+                t_progress = min(elapsed_time / duration, 1.0)
+            elif total and total > 0: # If duration not set, try to use total_requests for linear
+                if selected_pattern_key == 'linear':
+                    t_progress = min(count / total, 1.0)
+                # else: t_progress remains 1.0 for other patterns if no duration and not linear
+
+            pattern_scaling_factor = pattern_function(t_progress)
+
+            current_max_concurrency = concurrency # Max concurrency from CLI
+            current_concurrency = max(1, int(pattern_scaling_factor * current_max_concurrency))
 
             # schedule batch
             tasks = []
-            for _ in range(current):
+            for _ in range(current_concurrency):
                 key = next(key_cycle)
                 headers = {'Authorization': f"Bearer {key}"}
                 tasks.append(
@@ -172,7 +255,7 @@ def start_plot():
 
 def run_async_tasks_in_thread(keys, url, total_requests, concurrency, crescendo,
                               retries, backoff_method, backoff_base, backoff_cap,
-                              stop_event_arg, duration_arg, shared_context_arg):
+                              stop_event_arg, duration_arg, shared_context_arg, traffic_pattern):
     """Runs the asyncio worker_loop in a separate thread."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -185,7 +268,7 @@ def run_async_tasks_in_thread(keys, url, total_requests, concurrency, crescendo,
         loop.call_later(duration_arg, stop_event_arg.set)
 
     task = worker_loop(keys, url, total_requests, concurrency, crescendo,
-                       retries, backoff_method, backoff_base, backoff_cap)
+                       retries, backoff_method, backoff_base, backoff_cap, traffic_pattern, duration_arg)
     try:
         loop.run_until_complete(task)
     finally:
@@ -260,9 +343,13 @@ def print_summary_stats(results_deque, latencies_list, status_counts_counter):
 @click.option('--duration', type=int, default=None, help='Run for N seconds')
 @click.option('--live-plot/--no-live-plot', 'live_plot_enabled', default=True, help='Enable or disable live plotting window.')
 @click.option('--export-csv', type=click.Path(), default=None, help='Export raw CSV')
+@click.option('--traffic-pattern',
+              type=click.Choice(PATTERN_CHOICES, case_sensitive=False),
+              default='linear',
+              help='Traffic pattern to simulate. "random_cycle" will pick randomly from defined patterns.')
 def main(api_keys_file, api_keys, total_requests, concurrency, crescendo,
          endpoint, base_url, retries, backoff_method, backoff_base,
-         backoff_cap, duration, live_plot_enabled, export_csv):
+         backoff_cap, duration, live_plot_enabled, export_csv, traffic_pattern):
     """CLI wrapper: parse, set stop conditions, launch worker & plotting."""
     global start_time
     # Load keys
@@ -289,7 +376,8 @@ def main(api_keys_file, api_keys, total_requests, concurrency, crescendo,
             retries, backoff_method, backoff_base, backoff_cap,
             stop_event,  # Pass the global asyncio.Event
             duration,    # Pass duration
-            shared_context # Pass shared_context
+            shared_context, # Pass shared_context
+            traffic_pattern
         )
     )
     thread.daemon = True # So it exits when main thread exits, if not joined
