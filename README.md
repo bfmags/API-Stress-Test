@@ -48,7 +48,7 @@ python stress_test.py -f api_keys.txt -n 2000 -c 100 \
 - `-k, --api-keys TEXT`: Comma-separated API keys.
 - `-n, --total-requests INTEGER`: Total number of requests to send. If omitted, the test runs for the specified `--duration` or until manually interrupted (if plotting is also disabled).
 - `-c, --concurrency INTEGER`: Number of concurrent requests to maintain. Default: 50.
-- --traffic-pattern [linear|sin|cos|fourier|random_cycle]: Defines the pattern of requests over time. Default: `linear`.
+- --traffic-pattern [linear|sin]: Defines the pattern of requests over time. Default: `linear`.
     - `linear`: A linear ramp-up of traffic. This is the default behavior if `--traffic-pattern` is not specified.
     - `sin`: Traffic follows a sine wave pattern. The load will oscillate, completing a few cycles over the test duration.
 - `-e, --endpoint TEXT`: API endpoint path (e.g., `/users`). Required.
