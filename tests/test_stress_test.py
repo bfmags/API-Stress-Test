@@ -10,7 +10,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from stress_test import pattern_sin, pattern_cos, pattern_fourier_simple, pattern_linear, TRAFFIC_PATTERNS
+from stress_test import pattern_sin, pattern_fourier_simple, pattern_linear, pattern_quadratic, TRAFFIC_PATTERNS
 
 # General parameters for testing patterns
 T_PROGRESS_POINTS = [0.0, 0.25, 0.5, 0.75, 1.0]
@@ -21,13 +21,13 @@ def test_pattern_output_range():
     """Test that all pattern functions return values within [0.0, 1.0]."""
     patterns_to_test = {
         "sin": pattern_sin,
-        "cos": pattern_cos,
         "fourier": pattern_fourier_simple,
-        "linear": pattern_linear
+        "linear": pattern_linear,
+        "quadratic": pattern_quadratic
     }
     for name, func in patterns_to_test.items():
         for t in T_PROGRESS_POINTS:
-            if name in ["sin", "cos"]:
+            if name == "sin":
                 val = func(t, cycles=DEFAULT_CYCLES)
             elif name == "fourier":
                 val = func(t, cycles=FOURIER_CYCLES)
@@ -57,21 +57,6 @@ def test_pattern_sin_values():
     assert pattern_sin(0.75, cycles=DEFAULT_CYCLES) == pytest.approx(1.0) # Maxima for 3 cycles
     assert pattern_sin(1.0, cycles=DEFAULT_CYCLES) == pytest.approx(0.5)
 
-
-def test_pattern_cos_values():
-    """Test specific values for the cos pattern (default 3 cycles)."""
-    # (cos(t * 3 * 2 * pi) + 1) / 2
-    # t=0: (cos(0)+1)/2 = 1.0
-    # t=0.25: (cos(1.5*pi)+1)/2 = (0+1)/2 = 0.5
-    # t=0.5: (cos(3*pi)+1)/2 = (-1+1)/2 = 0.0
-    # t=0.75: (cos(4.5*pi)+1)/2 = (0+1)/2 = 0.5
-    # t=1.0: (cos(6*pi)+1)/2 = (1+1)/2 = 1.0
-    assert pattern_cos(0.0, cycles=DEFAULT_CYCLES) == pytest.approx(1.0)
-    assert pattern_cos(0.25, cycles=DEFAULT_CYCLES) == pytest.approx(0.5)
-    assert pattern_cos(0.5, cycles=DEFAULT_CYCLES) == pytest.approx(0.0)
-    assert pattern_cos(0.75, cycles=DEFAULT_CYCLES) == pytest.approx(0.5)
-    assert pattern_cos(1.0, cycles=DEFAULT_CYCLES) == pytest.approx(1.0)
-
 def test_pattern_fourier_simple_values():
     """Test specific values for the fourier pattern (default 2 cycles for fundamental)."""
     # val1 = 0.6 * (math.sin(t * cycles * 2 * math.pi) + 1) / 2
@@ -89,6 +74,16 @@ def test_pattern_fourier_simple_values():
     assert pattern_fourier_simple(t_at_peak_fundamental, cycles=FOURIER_CYCLES) == pytest.approx(0.8)
     # Max value should be 1.0, min 0.0. These are harder to calculate by hand simply.
     # The general range test (test_pattern_output_range) covers that they don't go out of [0,1].
+
+def test_pattern_quadratic_values():
+    """Test specific values for the quadratic pattern."""
+    assert pattern_quadratic(0.0) == pytest.approx(0.0)
+    assert pattern_quadratic(0.5) == pytest.approx(0.25)
+    assert pattern_quadratic(1.0) == pytest.approx(1.0)
+    # Also check range for good measure, though test_pattern_output_range covers this.
+    for t in T_PROGRESS_POINTS:
+        val = pattern_quadratic(t)
+        assert 0.0 <= val <= 1.0, f"quadratic pattern output {val} out of range for t={t}"
 
 # --- Tests for worker_loop concurrency calculation ---
 
@@ -110,7 +105,7 @@ def calculate_concurrency_for_test(traffic_pattern_name, t_progress, max_concurr
 
     pattern_function = TRAFFIC_PATTERNS[selected_pattern_key]
 
-    if selected_pattern_key in ["sin", "cos"]:
+    if selected_pattern_key == "sin":
         pattern_scaling_factor = pattern_function(t_progress, cycles=DEFAULT_CYCLES)
     elif selected_pattern_key == "fourier":
         pattern_scaling_factor = pattern_function(t_progress, cycles=FOURIER_CYCLES)
@@ -150,17 +145,17 @@ def test_worker_loop_concurrency_random_cycle(): # Removed mocker fixture
     max_conc = 100
     t_progress = 0.5
 
-    # Expected concurrency if 'cos' is chosen at t_progress=0.5 (default 3 cycles)
-    # cos(0.5 * 3 * 2 * pi) = cos(3pi) = -1. Factor = (-1+1)/2 = 0.
-    # Concurrency = max(1, int(0 * 100)) = 1
-    expected_conc_if_cos = 1
-    assert calculate_concurrency_for_test("random_cycle", t_progress, max_conc, mock_random_choice="cos") == expected_conc_if_cos
-
     # Expected concurrency if 'sin' is chosen at t_progress=0.5
     # sin(0.5 * 3 * 2* pi) = sin(3pi) = 0. Factor = (0+1)/2 = 0.5
     # Concurrency = max(1, int(0.5*100)) = 50
     expected_conc_if_sin = 50
     assert calculate_concurrency_for_test("random_cycle", t_progress, max_conc, mock_random_choice="sin") == expected_conc_if_sin
+
+    # Expected concurrency if 'quadratic' is chosen at t_progress=0.5
+    # factor = 0.5^2 = 0.25
+    # Concurrency = max(1, int(0.25*100)) = 25
+    expected_conc_if_quadratic = 25
+    assert calculate_concurrency_for_test("random_cycle", t_progress, max_conc, mock_random_choice="quadratic") == expected_conc_if_quadratic
 
 def test_worker_loop_concurrency_always_at_least_1():
     """Concurrency should always be at least 1, even if factor is 0."""
@@ -168,10 +163,6 @@ def test_worker_loop_concurrency_always_at_least_1():
     # For sin pattern at t_progress = 0.25 (with 3 cycles), factor is (sin(1.5pi)+1)/2 = 0
     t_progress_yields_zero_factor_sin = 0.25
     assert calculate_concurrency_for_test("sin", t_progress_yields_zero_factor_sin, max_conc) == 1
-
-    # For cos pattern at t_progress = 0.5 (with 3 cycles), factor is (cos(3pi)+1)/2 = 0
-    t_progress_yields_zero_factor_cos = 0.5
-    assert calculate_concurrency_for_test("cos", t_progress_yields_zero_factor_cos, max_conc) == 1
 
 # --- Test for sequential random_cycle behavior ---
 
@@ -189,7 +180,7 @@ def test_random_cycle_sequential_behavior(mocker):
     test_duration = 30.0        # Total test duration
     max_concurrency = 100
 
-    pattern_sequence = ["sin", "cos", "fourier"]
+    pattern_sequence = ["sin", "fourier", "quadratic"]
     num_patterns_in_cycle = len(pattern_sequence)
     segment_duration = test_duration / num_patterns_in_cycle # Should be 10.0s
 
@@ -207,14 +198,14 @@ def test_random_cycle_sequential_behavior(mocker):
         0.0,        # active: sin, seg_t_progress: 0.0
         5.0,        # active: sin, seg_t_progress: 0.5
         9.9,        # active: sin, seg_t_progress: ~0.99
-        # Transition to cos pattern
-        10.0,       # active: cos, seg_t_progress: 0.0
-        15.0,       # active: cos, seg_t_progress: 0.5
-        19.9,       # active: cos, seg_t_progress: ~0.99
         # Transition to fourier pattern
-        20.0,       # active: fourier, seg_t_progress: 0.0
-        25.0,       # active: fourier, seg_t_progress: 0.5
-        29.9,       # active: fourier, seg_t_progress: ~0.99
+        10.0,       # active: fourier, seg_t_progress: 0.0
+        15.0,       # active: fourier, seg_t_progress: 0.5
+        19.9,       # active: fourier, seg_t_progress: ~0.99
+        # Transition to quadratic pattern
+        20.0,       # active: quadratic, seg_t_progress: 0.0
+        25.0,       # active: quadratic, seg_t_progress: 0.5
+        29.9,       # active: quadratic, seg_t_progress: ~0.99
         # Optional: check one more transition back to sin if duration allows
         30.0        # active: sin (loops back), seg_t_progress: 0.0
     ]
@@ -222,8 +213,8 @@ def test_random_cycle_sequential_behavior(mocker):
     expected_states = [
         # (expected_active_pattern, expected_segment_t_progress_approx)
         ("sin", 0.0), ("sin", 0.5), ("sin", 0.99),
-        ("cos", 0.0), ("cos", 0.5), ("cos", 0.99),
         ("fourier", 0.0), ("fourier", 0.5), ("fourier", 0.99),
+        ("quadratic", 0.0), ("quadratic", 0.5), ("quadratic", 0.99),
         ("sin", 0.0) # Loops back
     ]
 
@@ -263,7 +254,7 @@ def test_random_cycle_sequential_behavior(mocker):
         # 3. Calculate and check concurrency
         # (Using default cycles for pattern functions as worker_loop does)
         # Determine cycles based on active pattern key
-        if _active_pattern_key in ["sin", "cos"]:
+        if _active_pattern_key == "sin":
             cycles_for_pattern = DEFAULT_CYCLES
         elif _active_pattern_key == "fourier":
             cycles_for_pattern = FOURIER_CYCLES
@@ -281,3 +272,67 @@ def test_random_cycle_sequential_behavior(mocker):
             f"Time {time_elapsed_in_test:.1f}s ({_active_pattern_key}): Concurrency {calculated_concurrency} out of range [1, {max_concurrency}]"
 
         # print(f"T={time_elapsed_in_test:.1f}s, MockT={current_simulated_time:.1f}, Active='{_active_pattern_key}', SegStartT={_segment_start_time:.1f}, SegElapsed={current_segment_elapsed_time:.2f}, SegTProgress={_current_pattern_t_progress:.2f}, Concurrency={calculated_concurrency}")
+
+
+# --- Test for request timeout ---
+import asyncio # For asyncio.sleep if needed in more complex mocks
+import httpx # For httpx.ReadTimeout and httpx.AsyncClient
+
+from stress_test import fetch_once, fixed_backoff # For testing fetch_once directly
+from stress_test import results as stress_test_results
+from stress_test import status_counts as stress_test_status_counts
+from stress_test import latencies as stress_test_latencies
+
+@pytest.mark.asyncio
+async def test_request_timeout_triggers():
+    """
+    Tests that the request_timeout parameter in fetch_once is correctly
+    passed to the HTTP client and that a timeout is handled as an error.
+    """
+    test_url = "http://localhost:12345/slow_endpoint" # Dummy URL, server not actually called due to mock
+    headers = {}
+    short_timeout = 0.05 # 50ms - very short for testing
+
+    # Store original httpx.AsyncClient.get
+    original_async_client_get = httpx.AsyncClient.get
+
+    async def mock_get_that_times_out(self, url, headers, timeout):
+        # 'self' is the httpx.AsyncClient instance here
+        assert timeout == short_timeout, f"Timeout value expected {short_timeout}, got {timeout}"
+        # Simulate a timeout by raising the specific exception httpx uses
+        raise httpx.ReadTimeout(f"Simulated read timeout on {url}", request=None)
+
+    # Patch the .get method on the class itself
+    httpx.AsyncClient.get = mock_get_that_times_out
+
+    # Use a real AsyncClient for context management; its .get method is now our mock
+    async with httpx.AsyncClient() as client:
+        # Clear global result accumulators from stress_test.py for an isolated test
+        stress_test_results.clear()
+        stress_test_status_counts.clear()
+        stress_test_latencies.clear()
+
+        await fetch_once(
+            client=client,
+            url=test_url,
+            headers=headers,
+            retries=0,  # Critical: 0 retries to ensure timeout error is not masked
+            backoff_fn=fixed_backoff, # Function itself doesn't matter with 0 retries
+            base=0.1,   # Value doesn't matter with 0 retries
+            cap=0.1,    # Value doesn't matter with 0 retries
+            request_timeout=short_timeout # The timeout being tested
+        )
+
+        assert len(stress_test_results) == 1, "One result should be recorded"
+        timestamp, latency, status = stress_test_results[0]
+
+        # Latency might be very small or 0 as the request didn't complete
+        # assert latency == 0, "Latency should be 0 for a request that timed out before response"
+        # Depending on how time.time() is captured, latency might be > 0, so we check status primarily.
+
+        assert "ERR:ReadTimeout" in str(status), f"Status should indicate ReadTimeout, got {status}"
+        assert stress_test_status_counts[status] == 1, "Status count for ReadTimeout error should be 1"
+        assert not stress_test_latencies, "Latencies list should be empty for failed request"
+
+    # Restore the original .get method to avoid affecting other tests
+    httpx.AsyncClient.get = original_async_client_get
