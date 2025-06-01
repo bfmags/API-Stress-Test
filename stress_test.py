@@ -54,16 +54,6 @@ def pattern_sin(t_progress: float, cycles: int = 3) -> float:
     # sin(x) ranges from -1 to 1. We want 0 to 1. So (sin(x) + 1) / 2.
     return (math.sin(t_progress * cycles * 2 * math.pi) + 1) / 2
 
-def pattern_cos(t_progress: float, cycles: int = 3) -> float:
-    """
-    Generates a cosine wave pattern scaling factor.
-    t_progress: Normalized time, from 0.0 to 1.0, representing test progress.
-    cycles: Number of full cosine wave cycles over the total duration.
-    Returns a scaling factor between 0.0 and 1.0.
-    """
-    # cos(x) ranges from -1 to 1. We want 0 to 1. So (cos(x) + 1) / 2.
-    return (math.cos(t_progress * cycles * 2 * math.pi) + 1) / 2
-
 def pattern_fourier_simple(t_progress: float, cycles: int = 2) -> float:
     """
     Generates a simple Fourier series-like pattern scaling factor.
@@ -90,12 +80,20 @@ def pattern_linear(t_progress: float) -> float:
     """
     return t_progress
 
+def pattern_quadratic(t_progress: float) -> float:
+    """
+    Generates a quadratic scaling factor.
+    t_progress: Normalized time, from 0.0 to 1.0.
+    Returns a scaling factor from 0.0 to 1.0 (t_progress^2).
+    """
+    return t_progress ** 2
+
 # Dictionary to hold pattern functions
 TRAFFIC_PATTERNS = {
     "sin": pattern_sin,
-    "cos": pattern_cos,
     "fourier": pattern_fourier_simple,
     "linear": pattern_linear, # For the existing crescendo behavior
+    "quadratic": pattern_quadratic,
 }
 
 PATTERN_CHOICES = list(TRAFFIC_PATTERNS.keys()) + ['random_cycle'] # Define this list here
@@ -109,7 +107,7 @@ start_time = None
 
 async def fetch_once(client: httpx.AsyncClient, url: str,
                      headers: dict, retries: int,
-                     backoff_fn, base: float, cap: float) -> None:
+                     backoff_fn, base: float, cap: float, request_timeout: float) -> None:
     """
     Send one GET request; on failure retry up to `retries` times with `backoff_fn`.
     Record (timestamp, latency, status) in shared deques.
@@ -120,7 +118,7 @@ async def fetch_once(client: httpx.AsyncClient, url: str,
         attempt += 1
         t0 = time.time()
         try:
-            resp = await client.get(url, headers=headers, timeout=30.0)
+            resp = await client.get(url, headers=headers, timeout=request_timeout)
             latency = time.time() - t0
             status = resp.status_code
         except Exception as e:
@@ -142,13 +140,13 @@ async def fetch_once(client: httpx.AsyncClient, url: str,
 
 
 async def worker_loop(keys, url, total, concurrency,
-                      retries, backoff_method, base, cap, traffic_pattern, duration):
+                      retries, backoff_method, base, cap, traffic_pattern, duration, request_timeout):
     """Continuously schedule `fetch_once` tasks until stop_event."""
     key_cycle = cycle(keys)
     count = 0
 
     # Initialization for the selected traffic pattern (or random_cycle sequence)
-    pattern_sequence = ["sin", "cos", "fourier"] # Order of patterns for cycling
+    pattern_sequence = ["sin", "fourier", "quadratic"] # Order of patterns for cycling
     num_patterns_in_cycle = len(pattern_sequence)
     current_pattern_index = 0
     segment_duration = 0  # Duration for each pattern segment in random_cycle
@@ -225,7 +223,7 @@ async def worker_loop(keys, url, total, concurrency,
                 headers = {'Authorization': f"Bearer {key}"}
                 tasks.append(
                     fetch_once(client, url, headers,
-                               retries, BACKOFF_METHODS[backoff_method], base, cap)
+                               retries, BACKOFF_METHODS[backoff_method], base, cap, request_timeout)
                 )
             # fire and forget
             await asyncio.gather(*tasks)
@@ -295,7 +293,7 @@ def start_plot():
 
 def run_async_tasks_in_thread(keys, url, total_requests, concurrency,
                               retries, backoff_method, backoff_base, backoff_cap,
-                              stop_event_arg, duration_arg, shared_context_arg, traffic_pattern):
+                              stop_event_arg, duration_arg, shared_context_arg, traffic_pattern, request_timeout):
     """Runs the asyncio worker_loop in a separate thread."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -308,7 +306,7 @@ def run_async_tasks_in_thread(keys, url, total_requests, concurrency,
         loop.call_later(duration_arg, stop_event_arg.set)
 
     task = worker_loop(keys, url, total_requests, concurrency,
-                       retries, backoff_method, backoff_base, backoff_cap, traffic_pattern, duration_arg)
+                       retries, backoff_method, backoff_base, backoff_cap, traffic_pattern, duration_arg, request_timeout)
     try:
         loop.run_until_complete(task)
     finally:
@@ -387,9 +385,10 @@ def print_summary_stats(results_deque, latencies_list, status_counts_counter):
               type=click.Choice(PATTERN_CHOICES, case_sensitive=False),
               default='linear',
               help='Traffic pattern to simulate. "random_cycle" will pick randomly from defined patterns.')
+@click.option('--request-timeout', type=float, default=30.0, help='Individual request timeout (s)')
 def main(api_keys_file, api_keys, total_requests, concurrency, # crescendo removed
          endpoint, base_url, retries, backoff_method, backoff_base,
-         backoff_cap, duration, live_plot_enabled, export_csv, traffic_pattern):
+         backoff_cap, duration, live_plot_enabled, export_csv, traffic_pattern, request_timeout):
     """CLI wrapper: parse, set stop conditions, launch worker & plotting."""
     global start_time
     # Load keys
@@ -417,7 +416,8 @@ def main(api_keys_file, api_keys, total_requests, concurrency, # crescendo remov
             stop_event,  # Pass the global asyncio.Event
             duration,    # Pass duration
             shared_context, # Pass shared_context
-            traffic_pattern
+            traffic_pattern,
+            request_timeout
         )
     )
     thread.daemon = True # So it exits when main thread exits, if not joined
